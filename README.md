@@ -93,3 +93,28 @@
 
 请在本地下载并完成数据预处理后，将数据放置在如下路径：
 backend/data/
+
+---
+## 运行说明
+### 准备数据
+按照上述说明下载好数据之后，放置于backend/data/
+
+### 训练模型
+python -m backend.training.train_logistic_regression
+
+python -m backend.training.train_graphsage
+
+python -m backend.training.train_gat
+
+python -m backend.training.train_gatv2
+
+4条指令，一共有4种模型：逻辑回归、GAT、GATv2、graphsage可供训练,对比分析
+
+### 生成可视化前端数据
+python backend/training/export_json.py
+
+### 打开前端界面
+frontend/index.html
+
+直接用浏览器打开：http://localhost:8000
+
