@@ -86,6 +86,7 @@
 
 - Twitter15 / Twitter16 数据集：
   https://github.com/majingCUHK/Rumor_RvNN
+  https://github.com/chunyuanY/RumorDetection?utm_source=chatgpt.com
 
 ### 数据放置说明
 
