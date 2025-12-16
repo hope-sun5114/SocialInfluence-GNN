@@ -1,0 +1,11 @@
+torch
+torch-geometric
+sentence-transformers
+scikit-learn
+numpy
+networkx
+tqdm
+textblob
+matplotlib
+scipy
+umap-learn

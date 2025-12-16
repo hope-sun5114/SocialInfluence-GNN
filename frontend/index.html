@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>SocialInfluence GNN</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            font-family: "Segoe UI", sans-serif;
+            background: #f1f5f9;
+            color: #334155;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+        header {
+            background: white;
+            height: 60px;
+            border-bottom: 1px solid #e2e8f0;
+            display: flex;
+            align-items: center;
+            padding: 0 24px;
+            flex-shrink: 0;
+        }
+        .brand {
+            font-size: 22px;
+            font-weight: bold;
+            color: #2563eb;
+        }
+        .badge {
+            margin-left: auto;
+            background: #dcfce7;
+            color: #166534;
+            padding: 4px 12px;
+            border-radius: 24px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        main {
+            flex: 1;
+            display: flex;
+            gap: 16px;
+            padding: 16px;
+            overflow: hidden;
+        }
+        aside, section {
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+        }
+        aside { width: 300px; flex-shrink: 0; }
+
+        .p-head {
+            padding: 12px 16px;
+            border-bottom: 1px solid #f1f5f9;
+            font-weight: bold;
+            background: #f8fafc;
+        }
+        .p-body { flex: 1; overflow-y: auto; }
+
+        .item {
+            padding: 8px 16px;
+            border-bottom: 1px solid #f8fafc;
+            display: flex;
+            font-size: 14px;
+            align-items: center;
+        }
+        .idx { width: 24px; color: #94a3b8; font-weight: bold; }
+        .score { margin-left: auto; color: #2563eb; font-size: 13px; font-family: monospace; }
+
+        #chart {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    min-width: 600px;
+}
+
+        #tsne { width: 100%; height: 400px; }
+
+        #loading {
+            position: absolute;
+            inset: 0;
+            background: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+            flex-direction: column;
+        }
+        #msg { margin-top: 10px; color: #64748b; font-size: 12px; }
+    </style>
+</head>
+
+<body>
+<header>
+    <div class="brand">SocialInfluence GNN</div>
+    <div class="badge" id="status-badge">v7.0 可视化版</div>
+</header>
+
+<main>
+    <!-- 左侧排名 -->
+    <aside>
+        <div class="p-head">🏆 影响力排行 (<span id="count">0</span>)</div>
+        <div class="p-body" id="list"></div>
+    </aside>
+
+    <!-- 中间图 -->
+    <section style="position:relative; flex:1; min-width:600px; display:flex;">
+        <div id="loading">
+            <div style="font-size: 32px;">⏳</div>
+            <div id="msg">正在加载图结构...</div>
+        </div>
+        <div id="chart"></div>
+    </section>
+
+    <!-- 右侧 TSNE -->
+    <aside>
+        <div class="p-head">🧬 特征分布</div>
+        <div class="p-body" style="padding:10px;">
+            <div id="tsne"></div>
+        </div>
+    </aside>
+</main>
+
+<script>
+const chart = echarts.init(document.getElementById("chart"));
+const tsne = echarts.init(document.getElementById("tsne"));
+
+window.onresize = () => { chart.resize(); tsne.resize(); };
+
+start();
+
+async function start() {
+    try {
+        const t = Date.now();
+
+        const [r1, r2, r3] = await Promise.all([
+            fetch("data/ranking.json?t="+t),
+            fetch("data/graph_fixed.json?t="+t),
+            fetch("data/tsne.json?t="+t)
+        ]);
+
+        if (!r1.ok || !r2.ok) throw new Error("数据文件读取失败");
+
+        /*-------------------------------------
+         * 1. Ranking 解析
+         -------------------------------------*/
+        const ranking = await r1.json();
+        let items = ranking.names.map((id,i)=>({
+            id: Number(id),
+            score: Number(ranking.scores[i])
+        })).sort((a,b)=>b.score - a.score);
+
+        document.getElementById("count").innerText = items.length;
+        document.getElementById("list").innerHTML = items.slice(0,100).map((d,i)=>
+            `<div class="item">
+                <span class="idx" style="${i<3?'color:#eab308':''}">${i+1}</span>
+                <span>Node ${d.id}</span>
+                <span class="score">${d.score.toFixed(4)}</span>
+            </div>`
+        ).join("");
+
+
+        /*-------------------------------------
+         * 2. graph_fixed.json（nodes + edges）
+         -------------------------------------*/
+
+        const gData = await r2.json();
+
+        const nodes_raw = gData.nodes || [];
+        const links_raw = gData.links || gData.edges || [];
+
+        // 节点 ID 数据保持为数字（防止边无法匹配）
+        const nodeIDs = nodes_raw.map(n => Number(n.id));
+
+        // 构建边（数字格式）
+        const edges = links_raw.map(e => ({
+            s: Number(e.source),
+            t: Number(e.target)
+        }));
+
+        /* -------- 构建邻接表 -------- */
+        const adj = {};
+        edges.forEach(e => {
+            if (!adj[e.s]) adj[e.s] = [];
+            if (!adj[e.t]) adj[e.t] = [];
+            adj[e.s].push(e.t);
+            adj[e.t].push(e.s);
+        });
+
+        /* -------- 选取前 200 高影响力节点 -------- */
+        const topRank = items
+            .slice(0, 200)
+            .map(o => Number(o.id));
+
+        /* -------- BFS 扩展子图（最多 3000 节点）-------- */
+        const subSet = new Set();
+        const subLinks = [];
+        const queue = [...topRank];
+
+        topRank.forEach(id => subSet.add(id));
+
+        while (queue.length > 0 && subSet.size < 3000) {
+            const u = queue.shift();
+            const neighbors = adj[u] || [];
+
+            neighbors.forEach(v => {
+                if (!subSet.has(v)) {
+                    subSet.add(v);
+                    queue.push(v);
+                }
+                subLinks.push({ source: u, target: v });
+            });
+        }
+
+        /* -------- 构建最终 ECharts 节点格式 -------- */
+        const subNodes = Array.from(subSet).map(id => ({
+            id: String(id),   // ECharts 用字符串标识，但内部逻辑仍是数字
+            name: String(id),
+            value: 1,
+            symbolSize: topRank.includes(id) ? 18 : 5,
+            itemStyle: {
+                color: topRank.includes(id) ? "#ef4444" : "#3b82f6"
+            }
+        }));
+
+        console.log("子图节点数 =", subSet.size);
+        console.log("子图边数 =", subLinks.length);
+
+        /* -------- 渲染最终子图 -------- */
+        chart.setOption({
+            tooltip: {},
+            animation: false,
+            series: [{
+                type: "graph",
+                layout: "force",
+                data: subNodes,
+                links: subLinks,
+                roam: true,
+                force: {
+                    repulsion: 150,
+                    gravity: 0.1
+                }
+            }]
+        });
+
+        /*-------------------------------------
+         * 5. TSNE 可视化
+         -------------------------------------*/
+        
+        const tData = await r3.json();
+        let points = [];
+
+        // 情况1: {x:[], y:[]}
+        if (tData.x && tData.y) {
+            points = tData.x.map((x,i)=>[x, tData.y[i]]);
+        }
+        // 情况2: [[x,y], [x,y], ...]
+        else if (Array.isArray(tData) && Array.isArray(tData[0])) {
+            points = tData;
+        }
+        // 情况3: {points: [[x,y],...]}
+        else if (tData.points) {
+            points = tData.points;
+        }
+        // 不支持的格式
+        else {
+            console.error("未知 TSNE 格式:", tData);
+        }
+
+        // 渲染散点图
+        tsne.setOption({
+            xAxis: { show: false },
+            yAxis: { show: false },
+            tooltip: {},
+            series: [{
+                type: "scatter",
+                symbolSize: 3,
+                data: points.slice(0,1500),
+                itemStyle: { color: "#2563eb" }
+            }]
+        });
+
+
+        document.getElementById("loading").style.display = "none";
+
+    } catch(err) {
+        console.error(err);
+        document.getElementById("msg").innerHTML =
+            `<span style='color:red;'>${err.message}</span>`;
+    }
+}
+</script>
+</body>
+</html>

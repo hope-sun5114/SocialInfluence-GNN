@@ -1,0 +1,19 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# PyTorch / model files
+*.pt
+*.pth
+*.pkl
+
+# Data (large files, do not upload)
+backend/data/
+
+# Virtual environment
+venv/
+.env/
+
+# OS files
+.DS_Store
+Thumbs.db
