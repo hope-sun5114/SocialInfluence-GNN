@@ -112,6 +112,7 @@ python -m backend.training.train_gatv2
 
 ### 生成可视化前端数据
 python backend/training/export_json.py
+如果数据有问题，运行python build_twitter15_dataset.py进行修复，使其格式和模型相互适配
 
 ### 打开前端界面
 frontend/index.html
